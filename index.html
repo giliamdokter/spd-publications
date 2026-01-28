@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Publications</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1.5;
+    }
+    .pub {
+      margin-bottom: 1em;
+    }
+    .year {
+      font-weight: bold;
+      margin-top: 2em;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Publications</h2>
+<div id="pubs">Loading publications…</div>
+
+<script>
+const orcids = [
+  "0000-0002-5667-3293",
+  "0000-0002-7382-1825",
+  "0000-0003-0373-3720",
+  "0000-0001-8466-8259",
+  "0009-0008-1469-058X"
+  // add all group ORCID IDs here
+];
+
+async function fetchPublications(orcid) {
+  const url = `https://pub.orcid.org/v3.0/${orcid}/works`;
+  const res = await fetch(url, {
+    headers: { "Accept": "application/json" }
+  });
+  const data = await res.json();
+  return data.group || [];
+}
+
+function extractYear(work) {
+  return work["work-summary"][0]?.["publication-date"]?.year?.value || "Unknown";
+}
+
+function extractCitation(work) {
+  const s = work["work-summary"][0];
+  const title = s.title?.title?.value || "Untitled";
+  const journal = s["journal-title"]?.value || "";
+  const year = extractYear(work);
+  const doi = s["external-ids"]?.["external-id"]?.find(
+    id => id["external-id-type"] === "doi"
+  )?.["external-id-value"];
+
+  let citation = `<strong>${title}</strong>`;
+  if (journal) citation += `. <em>${journal}</em>`;
+  if (year) citation += ` (${year})`;
+  if (doi) citation += ` — <a href="https://doi.org/${doi}" target="_blank">doi</a>`;
+  return citation;
+}
+
+async function loadAll() {
+  let works = [];
+  for (const id of orcids) {
+    const pubs = await fetchPublications(id);
+    works = works.concat(pubs);
+  }
+
+  // deduplicate by title
+  const seen = new Set();
+  works = works.filter(w => {
+    const t = w["work-summary"][0]?.title?.title?.value;
+    if (!t || seen.has(t)) return false;
+    seen.add(t);
+    return true;
+  });
+
+  // sort by year (descending)
+  works.sort((a, b) => extractYear(b) - extractYear(a));
+
+  const container = document.getElementById("pubs");
+  container.innerHTML = "";
+
+  works.forEach(w => {
+    const div = document.createElement("div");
+    div.className = "pub";
+    div.innerHTML = extractCitation(w);
+    container.appendChild(div);
+  });
+}
+
+loadAll();
+</script>
+
+</body>
+</html>

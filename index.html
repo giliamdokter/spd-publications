@@ -3,127 +3,294 @@
 <head>
 <meta charset="UTF-8">
 <title>Publications</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+<!-- Poppins font (Squarespace default-like) -->
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+
 <style>
-body { font-family: "Poppins", sans-serif; line-height:1.65; color:#222; margin:0; padding:0; }
-#controls { display:flex; gap:1rem; margin-bottom:2rem; flex-wrap:wrap; }
-#search, #yearFilter { padding:0.65rem 0.75rem; font-size:0.9rem; border:1px solid #ccc; border-radius:4px; font-family:inherit; }
-#search{flex:1;}
-.year { font-size:1.3rem; font-weight:600; margin-top:2.5rem; border-bottom:1px solid #ddd; padding-bottom:0.35rem; }
-.pub { margin:0.85rem 0; font-size:0.92rem; }
-.pub a { color:inherit; text-decoration:underline; }
-.loading { font-style:normal; color:#666; }
+/* ================================
+   Squarespace-like professional styling
+================================ */
+body {
+  font-family: "Poppins", system-ui, -apple-system, BlinkMacSystemFont,
+               "Helvetica Neue", Helvetica, Arial, sans-serif;
+  line-height: 1.65;
+  color: #222;
+  margin: 0;
+  padding: 0;
+}
+
+#controls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+#search {
+  flex: 1;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+#yearFilter {
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: white;
+  font-family: inherit;
+}
+
+.year {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-top: 2.5rem;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 0.35rem;
+}
+
+.pub {
+  margin: 0.85rem 0;
+  font-size: 0.92rem;
+}
+
+.pub a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.pub a:hover {
+  text-decoration: none;
+}
+
+.loading {
+  font-style: italic;
+  color: #666;
+}
 </style>
 </head>
+
 <body>
 
 <div id="controls">
   <input type="text" id="search" placeholder="Search publications…">
-  <select id="yearFilter"><option value="all">All years</option></select>
+  <select id="yearFilter">
+    <option value="all">All years</option>
+  </select>
 </div>
 
 <div id="pubs" class="loading">Loading publications…</div>
 
 <script>
+/* ================================
+   CONFIG: ADD ORCID IDS HERE
+================================ */
 const ORCIDS = [
   "0000-0002-5667-3293",
   "0000-0002-7382-1825",
   "0000-0003-0373-3720",
   "0000-0001-8466-8259",
   "0009-0008-1469-058X"
-  // add more ORCIDs
+  // add more ORCID IDs as needed
 ];
-const YEAR_CUTOFF = 2015;
+
+/* ================================
+   ORCID API CALLS
+================================ */
+async function fetchWorks(orcid) {
+  const url = `https://pub.orcid.org/v3.0/${orcid}/works`;
+  const res = await fetch(url, {
+    headers: { "Accept": "application/json" }
+  });
+  const data = await res.json();
+  return data.group || [];
+}
+
+async function fetchWorkDetails(orcid, putCode) {
+  const url = `https://pub.orcid.org/v3.0/${orcid}/work/${putCode}`;
+  const res = await fetch(url, {
+    headers: { "Accept": "application/json" }
+  });
+  return await res.json();
+}
+
+/* ================================
+   METADATA HELPERS
+================================ */
+function getTitleFromSummary(work) {
+  return work["work-summary"][0]?.title?.title?.value || "";
+}
+
+function getYear(work) {
+  return work["publication-date"]?.year?.value || "n.d.";
+}
+
+function extractAuthors(work) {
+  if (!work?.contributors?.contributor) return "";
+
+  return work.contributors.contributor
+    .map(c => c["credit-name"]?.value)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function extractDOI(work) {
+  return work["external-ids"]?.["external-id"]
+    ?.find(id => id["external-id-type"] === "doi")
+    ?.["external-id-value"];
+}
+
+/* ================================
+   APA-LIKE FORMATTER
+================================ */
+function formatCitation(work) {
+  const authors = extractAuthors(work);
+  const year = getYear(work);
+  const title = work.title?.title?.value || "Untitled";
+  const journal = work["journal-title"]?.value || "";
+  const doi = extractDOI(work);
+
+  let citation = "";
+
+  if (authors) {
+    citation += `<strong>${authors}</strong> `;
+  }
+
+  citation += `(${year}). <strong>${title}</strong>. `;
+
+  if (journal) {
+    citation += `<em>${journal}</em>. `;
+  }
+
+  if (doi) {
+    citation += `<a href="https://doi.org/${doi}" target="_blank">https://doi.org/${doi}</a>`;
+  }
+
+  return citation;
+}
+
+/* ================================
+   LOAD & PROCESS PUBLICATIONS
+================================ */
 let allPubs = [];
 
-// Fetch all works summaries per ORCID (fast)
-async function fetchWorksSummary(orcid){
-  try {
-    const res = await fetch(`https://pub.orcid.org/v3.0/${orcid}/works`, { headers:{Accept:"application/json"} });
-    const data = await res.json();
-    return data.group || [];
-  } catch(e){
-    console.error("Failed to fetch ORCID works for", orcid, e);
-    return [];
+async function loadPublications() {
+  let summaries = [];
+
+  for (const orcid of ORCIDS) {
+    const works = await fetchWorks(orcid);
+    works.forEach(w => {
+      const summary = w["work-summary"][0];
+      summaries.push({
+        orcid: orcid,
+        putCode: summary["put-code"],
+        title: getTitleFromSummary(w)
+      });
+    });
   }
-}
 
-// Extract year, title, DOI, journal, and authors from summary
-function parseSummary(group){
-  if(!group || !group.length) return null;
-  const summary = group[0]["work-summary"][0]; // use first summary in group
-  const year = parseInt(summary["publication-date"]?.year?.value) || 0;
-  if(year < YEAR_CUTOFF) return null;
-
-  // Use ORCID citation if available
-  let authors = summary.citation?.citation?.value?.split("(")[0]?.trim() || "";
-  // Fallback: use title if authors missing
-  if(!authors && summary.title?.title?.value) authors = "";
-
-  const title = summary.title?.title?.value || "Untitled";
-  const journal = summary["journal-title"]?.value || "";
-  const doi = summary["external-ids"]?.["external-id"]?.find(id=>id["external-id-type"]==="doi")?.["external-id-value"];
-
-  return {year, title, journal, doi, authors};
-}
-
-// Format for display
-function formatCitation(pub){
-  let html = "";
-  if(pub.authors) html += `<strong>${pub.authors}</strong> `;
-  html += `(${pub.year}). ${pub.title}. `;
-  if(pub.journal) html += `${pub.journal}. `;
-  if(pub.doi) html += `<a href="https://doi.org/${pub.doi}" target="_blank">https://doi.org/${pub.doi}</a>`;
-  return html;
-}
-
-// Populate year filter dropdown
-function populateYearFilter(){
-  const years = [...new Set(allPubs.map(p=>p.year))].sort((a,b)=>b-a);
-  const sel = document.getElementById("yearFilter");
-  sel.innerHTML = '<option value="all">All years</option>';
-  years.forEach(y=>{
-    const o = document.createElement("option"); o.value=y; o.textContent=y; sel.appendChild(o);
-  });
-}
-
-// Render publications grouped by year
-function render(){
-  const q = document.getElementById("search").value.toLowerCase();
-  const yf = document.getElementById("yearFilter").value;
-  const c = document.getElementById("pubs");
-  c.innerHTML="";
-
-  const filtered = allPubs.filter(p=>{
-    const t = formatCitation(p).toLowerCase();
-    const yearMatch = yf==="all" || p.year.toString()===yf;
-    return t.includes(q) && yearMatch;
+  /* Deduplicate by title */
+  const seen = new Set();
+  summaries = summaries.filter(w => {
+    if (!w.title || seen.has(w.title)) return false;
+    seen.add(w.title);
+    return true;
   });
 
-  if(!filtered.length){ c.innerHTML="<p class='loading'>No matching publications.</p>"; return; }
+  /* Fetch full records */
+  allPubs = [];
+  for (const w of summaries) {
+    try {
+      const full = await fetchWorkDetails(w.orcid, w.putCode);
+      allPubs.push(full);
+    } catch (e) {
+      console.warn("Failed to fetch work", w, e);
+    }
+  }
 
-  const byYear = {};
-  filtered.forEach(p=>{ byYear[p.year] ??= []; byYear[p.year].push(p); });
-
-  Object.keys(byYear).sort((a,b)=>b-a).forEach(y=>{
-    const h = document.createElement("div"); h.className="year"; h.textContent=y; c.appendChild(h);
-    byYear[y].forEach(p=>{ const d=document.createElement("div"); d.className="pub"; d.innerHTML=formatCitation(p); c.appendChild(d); });
+  /* Sort by year descending */
+  allPubs.sort((a, b) => {
+    const y1 = parseInt(getYear(a)) || 0;
+    const y2 = parseInt(getYear(b)) || 0;
+    return y2 - y1;
   });
-}
 
-// Load all summaries (1 request per ORCID)
-async function loadPublications(){
-  document.getElementById("pubs").innerHTML="<p class='loading'>Loading publications…</p>";
-  const results = await Promise.all(ORCIDS.map(fetchWorksSummary));
-  allPubs = results.flatMap(group=>parseSummary(group)?[parseSummary(group)]:[]);
-  allPubs.sort((a,b)=>b.year - a.year);
   populateYearFilter();
   render();
 }
 
+/* ================================
+   UI FUNCTIONS
+================================ */
+function populateYearFilter() {
+  const years = [...new Set(allPubs.map(w => getYear(w)))]
+    .filter(y => y !== "n.d.")
+    .sort((a, b) => b - a);
+
+  const select = document.getElementById("yearFilter");
+  years.forEach(y => {
+    const opt = document.createElement("option");
+    opt.value = y;
+    opt.textContent = y;
+    select.appendChild(opt);
+  });
+}
+
+function render() {
+  const container = document.getElementById("pubs");
+  const searchTerm = document.getElementById("search").value.toLowerCase();
+  const yearFilter = document.getElementById("yearFilter").value;
+
+  container.innerHTML = "";
+
+  const filtered = allPubs.filter(w => {
+    const text = formatCitation(w).toLowerCase();
+    const yearMatch = yearFilter === "all" || getYear(w) === yearFilter;
+    return text.includes(searchTerm) && yearMatch;
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = "<p class='loading'>No matching publications.</p>";
+    return;
+  }
+
+  const grouped = {};
+  filtered.forEach(w => {
+    const y = getYear(w);
+    if (!grouped[y]) grouped[y] = [];
+    grouped[y].push(w);
+  });
+
+  Object.keys(grouped)
+    .sort((a, b) => b - a)
+    .forEach(y => {
+      const yearDiv = document.createElement("div");
+      yearDiv.className = "year";
+      yearDiv.textContent = y;
+      container.appendChild(yearDiv);
+
+      grouped[y].forEach(w => {
+        const div = document.createElement("div");
+        div.className = "pub";
+        div.innerHTML = formatCitation(w);
+        container.appendChild(div);
+      });
+    });
+}
+
+/* ================================
+   EVENTS
+================================ */
 document.getElementById("search").addEventListener("input", render);
 document.getElementById("yearFilter").addEventListener("change", render);
 
+/* ================================
+   INIT
+================================ */
 loadPublications();
 </script>
 

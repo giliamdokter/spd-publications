@@ -4,11 +4,17 @@
 <meta charset="UTF-8">
 <title>Publications</title>
 
+<!-- Poppins font (Squarespace default-like) -->
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+
 <style>
-/* ---- Squarespace-friendly professional styling ---- */
+/* ================================
+   Squarespace-like professional styling
+================================ */
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
-  line-height: 1.6;
+  font-family: "Poppins", system-ui, -apple-system, BlinkMacSystemFont,
+               "Helvetica Neue", Helvetica, Arial, sans-serif;
+  line-height: 1.65;
   color: #222;
   margin: 0;
   padding: 0;
@@ -23,31 +29,33 @@ body {
 
 #search {
   flex: 1;
-  padding: 0.6rem 0.7rem;
-  font-size: 0.95rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9rem;
   border: 1px solid #ccc;
   border-radius: 4px;
+  font-family: inherit;
 }
 
 #yearFilter {
-  padding: 0.6rem 0.7rem;
-  font-size: 0.95rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9rem;
   border: 1px solid #ccc;
   border-radius: 4px;
   background: white;
+  font-family: inherit;
 }
 
 .year {
-  font-size: 1.4rem;
+  font-size: 1.3rem;
   font-weight: 600;
   margin-top: 2.5rem;
   border-bottom: 1px solid #ddd;
-  padding-bottom: 0.3rem;
+  padding-bottom: 0.35rem;
 }
 
 .pub {
-  margin: 0.8rem 0;
-  font-size: 0.95rem;
+  margin: 0.85rem 0;
+  font-size: 0.92rem;
 }
 
 .pub a {
@@ -79,7 +87,7 @@ body {
 
 <script>
 /* ================================
-   CONFIG
+   CONFIG: ADD ORCID IDS HERE
 ================================ */
 const ORCIDS = [
   "0000-0002-5667-3293",
@@ -87,11 +95,11 @@ const ORCIDS = [
   "0000-0003-0373-3720",
   "0000-0001-8466-8259",
   "0009-0008-1469-058X"
-  // add all ORCID IDs here
+  // add more ORCID IDs as needed
 ];
 
 /* ================================
-   ORCID FETCHING
+   ORCID API CALLS
 ================================ */
 async function fetchWorks(orcid) {
   const url = `https://pub.orcid.org/v3.0/${orcid}/works`;
@@ -102,91 +110,127 @@ async function fetchWorks(orcid) {
   return data.group || [];
 }
 
-/* ================================
-   HELPERS
-================================ */
-function getYear(work) {
-  return work["work-summary"][0]?.["publication-date"]?.year?.value || "Unknown";
+async function fetchWorkDetails(orcid, putCode) {
+  const url = `https://pub.orcid.org/v3.0/${orcid}/work/${putCode}`;
+  const res = await fetch(url, {
+    headers: { "Accept": "application/json" }
+  });
+  return await res.json();
 }
 
-function getDOI(work) {
-  return work["work-summary"][0]?.["external-ids"]?.["external-id"]
+/* ================================
+   METADATA HELPERS
+================================ */
+function getTitleFromSummary(work) {
+  return work["work-summary"][0]?.title?.title?.value || "";
+}
+
+function getYear(work) {
+  return work["publication-date"]?.year?.value || "n.d.";
+}
+
+function extractAuthors(work) {
+  if (!work?.contributors?.contributor) return "";
+
+  return work.contributors.contributor
+    .map(c => c["credit-name"]?.value)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function extractDOI(work) {
+  return work["external-ids"]?.["external-id"]
     ?.find(id => id["external-id-type"] === "doi")
     ?.["external-id-value"];
 }
 
-function getTitle(work) {
-  return work["work-summary"][0]?.title?.title?.value || "Untitled";
-}
-
-function getJournal(work) {
-  return work["work-summary"][0]?.["journal-title"]?.value || "";
-}
-
 /* ================================
-   APA-LIKE FORMAT
-   (ORCID doesn't expose full author lists reliably;
-    we pull author strings when available)
+   APA-LIKE FORMATTER
 ================================ */
-function formatAPA(work) {
-  const summary = work["work-summary"][0];
-  const title = getTitle(work);
-  const journal = getJournal(work);
+function formatCitation(work) {
+  const authors = extractAuthors(work);
   const year = getYear(work);
-  const doi = getDOI(work);
+  const title = work.title?.title?.value || "Untitled";
+  const journal = work["journal-title"]?.value || "";
+  const doi = extractDOI(work);
 
   let citation = "";
 
-  if (summary?.contributors?.contributor?.length) {
-    const authors = summary.contributors.contributor
-      .map(c => c["credit-name"]?.value)
-      .filter(Boolean)
-      .join(", ");
-    citation += `${authors}. `;
+  if (authors) {
+    citation += `<strong>${authors}</strong> `;
   }
 
   citation += `(${year}). <strong>${title}</strong>. `;
-  if (journal) citation += `<em>${journal}</em>. `;
-  if (doi) citation += `<a href="https://doi.org/${doi}" target="_blank">https://doi.org/${doi}</a>`;
+
+  if (journal) {
+    citation += `<em>${journal}</em>. `;
+  }
+
+  if (doi) {
+    citation += `<a href="https://doi.org/${doi}" target="_blank">https://doi.org/${doi}</a>`;
+  }
 
   return citation;
 }
 
 /* ================================
-   LOAD + PROCESS
+   LOAD & PROCESS PUBLICATIONS
 ================================ */
 let allPubs = [];
 
 async function loadPublications() {
-  let works = [];
+  let summaries = [];
 
-  for (const id of ORCIDS) {
-    const pubs = await fetchWorks(id);
-    works = works.concat(pubs);
+  for (const orcid of ORCIDS) {
+    const works = await fetchWorks(orcid);
+    works.forEach(w => {
+      const summary = w["work-summary"][0];
+      summaries.push({
+        orcid: orcid,
+        putCode: summary["put-code"],
+        title: getTitleFromSummary(w)
+      });
+    });
   }
 
   /* Deduplicate by title */
   const seen = new Set();
-  works = works.filter(w => {
-    const t = getTitle(w);
-    if (!t || seen.has(t)) return false;
-    seen.add(t);
+  summaries = summaries.filter(w => {
+    if (!w.title || seen.has(w.title)) return false;
+    seen.add(w.title);
     return true;
   });
 
-  /* Sort newest first */
-  works.sort((a, b) => getYear(b) - getYear(a));
+  /* Fetch full records */
+  allPubs = [];
+  for (const w of summaries) {
+    try {
+      const full = await fetchWorkDetails(w.orcid, w.putCode);
+      allPubs.push(full);
+    } catch (e) {
+      console.warn("Failed to fetch work", w, e);
+    }
+  }
 
-  allPubs = works;
+  /* Sort by year descending */
+  allPubs.sort((a, b) => {
+    const y1 = parseInt(getYear(a)) || 0;
+    const y2 = parseInt(getYear(b)) || 0;
+    return y2 - y1;
+  });
+
   populateYearFilter();
   render();
 }
 
 /* ================================
-   UI
+   UI FUNCTIONS
 ================================ */
 function populateYearFilter() {
-  const years = [...new Set(allPubs.map(w => getYear(w)))].sort((a,b) => b-a);
+  const years = [...new Set(allPubs.map(w => getYear(w)))]
+    .filter(y => y !== "n.d.")
+    .sort((a, b) => b - a);
+
   const select = document.getElementById("yearFilter");
   years.forEach(y => {
     const opt = document.createElement("option");
@@ -199,15 +243,14 @@ function populateYearFilter() {
 function render() {
   const container = document.getElementById("pubs");
   const searchTerm = document.getElementById("search").value.toLowerCase();
-  const year = document.getElementById("yearFilter").value;
+  const yearFilter = document.getElementById("yearFilter").value;
 
   container.innerHTML = "";
 
-  let filtered = allPubs.filter(w => {
-    const text = formatAPA(w).toLowerCase();
-    const yearMatch = (year === "all" || getYear(w) === year);
-    const searchMatch = text.includes(searchTerm);
-    return yearMatch && searchMatch;
+  const filtered = allPubs.filter(w => {
+    const text = formatCitation(w).toLowerCase();
+    const yearMatch = yearFilter === "all" || getYear(w) === yearFilter;
+    return text.includes(searchTerm) && yearMatch;
   });
 
   if (!filtered.length) {
@@ -222,19 +265,21 @@ function render() {
     grouped[y].push(w);
   });
 
-  Object.keys(grouped).sort((a,b) => b-a).forEach(y => {
-    const yearDiv = document.createElement("div");
-    yearDiv.className = "year";
-    yearDiv.textContent = y;
-    container.appendChild(yearDiv);
+  Object.keys(grouped)
+    .sort((a, b) => b - a)
+    .forEach(y => {
+      const yearDiv = document.createElement("div");
+      yearDiv.className = "year";
+      yearDiv.textContent = y;
+      container.appendChild(yearDiv);
 
-    grouped[y].forEach(w => {
-      const div = document.createElement("div");
-      div.className = "pub";
-      div.innerHTML = formatAPA(w);
-      container.appendChild(div);
+      grouped[y].forEach(w => {
+        const div = document.createElement("div");
+        div.className = "pub";
+        div.innerHTML = formatCitation(w);
+        container.appendChild(div);
+      });
     });
-  });
 }
 
 /* ================================

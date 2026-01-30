@@ -4,13 +4,14 @@
 <meta charset="UTF-8">
 <title>Publications</title>
 
-<!-- Poppins font (Squarespace default-like) -->
+<!-- Poppins font -->
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
 
 <style>
 /* ================================
-   Squarespace-like professional styling
+   Squarespace-like styling
 ================================ */
+
 body {
   font-family: "Poppins", system-ui, -apple-system, BlinkMacSystemFont,
                "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -68,8 +69,8 @@ body {
 }
 
 .loading {
-  font-style: italic;
   color: #666;
+  font-style: italic;
 }
 </style>
 </head>
@@ -87,40 +88,51 @@ body {
 
 <script>
 /* ================================
-   CONFIG: ADD ORCID IDS HERE
+   CONFIG
 ================================ */
+
 const ORCIDS = [
   "0000-0002-5667-3293",
   "0000-0002-7382-1825",
   "0000-0003-0373-3720",
   "0000-0001-8466-8259",
   "0009-0008-1469-058X"
-  // add more ORCID IDs as needed
 ];
 
+const YEAR_CUTOFF = 2015;
+
+let allPubs = [];
+
 /* ================================
-   ORCID API CALLS
+   ORCID API
 ================================ */
+
 async function fetchWorks(orcid) {
-  const url = `https://pub.orcid.org/v3.0/${orcid}/works`;
-  const res = await fetch(url, {
-    headers: { "Accept": "application/json" }
-  });
+
+  const res = await fetch(
+    `https://pub.orcid.org/v3.0/${orcid}/works`,
+    { headers: { "Accept": "application/json" } }
+  );
+
   const data = await res.json();
+
   return data.group || [];
 }
 
 async function fetchWorkDetails(orcid, putCode) {
-  const url = `https://pub.orcid.org/v3.0/${orcid}/work/${putCode}`;
-  const res = await fetch(url, {
-    headers: { "Accept": "application/json" }
-  });
+
+  const res = await fetch(
+    `https://pub.orcid.org/v3.0/${orcid}/work/${putCode}`,
+    { headers: { "Accept": "application/json" } }
+  );
+
   return await res.json();
 }
 
 /* ================================
-   METADATA HELPERS
+   HELPERS
 ================================ */
+
 function getTitleFromSummary(work) {
   return work["work-summary"][0]?.title?.title?.value || "";
 }
@@ -130,6 +142,7 @@ function getYear(work) {
 }
 
 function extractAuthors(work) {
+
   if (!work?.contributors?.contributor) return "";
 
   return work.contributors.contributor
@@ -139,15 +152,18 @@ function extractAuthors(work) {
 }
 
 function extractDOI(work) {
+
   return work["external-ids"]?.["external-id"]
     ?.find(id => id["external-id-type"] === "doi")
     ?.["external-id-value"];
 }
 
 /* ================================
-   APA-LIKE FORMATTER
+   FORMAT
 ================================ */
+
 function formatCitation(work) {
+
   const authors = extractAuthors(work);
   const year = getYear(work);
   const title = work.title?.title?.value || "Untitled";
@@ -160,123 +176,218 @@ function formatCitation(work) {
     citation += `<strong>${authors}</strong> `;
   }
 
-  citation += `(${year}). <strong>${title}</strong>. `;
+  citation += `(${year}). ${title}. `;
 
   if (journal) {
-    citation += `<em>${journal}</em>. `;
+    citation += `${journal}. `;
   }
 
   if (doi) {
-    citation += `<a href="https://doi.org/${doi}" target="_blank">https://doi.org/${doi}</a>`;
+    citation +=
+      `<a href="https://doi.org/${doi}" target="_blank">
+        https://doi.org/${doi}
+      </a>`;
   }
 
   return citation;
 }
 
 /* ================================
-   LOAD & PROCESS PUBLICATIONS
+   LOAD PUBLICATIONS
 ================================ */
-let allPubs = [];
 
 async function loadPublications() {
+
+  const container = document.getElementById("pubs");
+
+  container.innerHTML =
+    "<p class='loading'>Fetching publication list…</p>";
+
   let summaries = [];
 
+  /* ---- STEP 1: Fetch summaries ---- */
+
   for (const orcid of ORCIDS) {
+
+    container.innerHTML =
+      `<p class="loading">
+        Fetching records for ${orcid}…
+      </p>`;
+
     const works = await fetchWorks(orcid);
+
     works.forEach(w => {
+
       const summary = w["work-summary"][0];
+
+      const year =
+        parseInt(summary["publication-date"]?.year?.value) || 0;
+
+      // Apply cutoff here
+      if (year < YEAR_CUTOFF) return;
+
       summaries.push({
         orcid: orcid,
         putCode: summary["put-code"],
-        title: getTitleFromSummary(w)
+        title: getTitleFromSummary(w),
+        year: year
       });
     });
   }
 
-  /* Deduplicate by title */
+  /* ---- STEP 2: Deduplicate ---- */
+
   const seen = new Set();
+
   summaries = summaries.filter(w => {
+
     if (!w.title || seen.has(w.title)) return false;
+
     seen.add(w.title);
+
     return true;
   });
 
-  /* Fetch full records */
+  /* ---- STEP 3: Fetch full records ---- */
+
   allPubs = [];
+
+  const total = summaries.length;
+
+  let completed = 0;
+
   for (const w of summaries) {
+
+    completed++;
+
+    container.innerHTML =
+      `<p class="loading">
+        Loading publications ${completed} / ${total}…
+      </p>`;
+
     try {
-      const full = await fetchWorkDetails(w.orcid, w.putCode);
-      allPubs.push(full);
+
+      const full =
+        await fetchWorkDetails(w.orcid, w.putCode);
+
+      const year = parseInt(getYear(full)) || 0;
+
+      // Safety cutoff
+      if (year >= YEAR_CUTOFF) {
+        allPubs.push(full);
+      }
+
     } catch (e) {
+
       console.warn("Failed to fetch work", w, e);
     }
   }
 
-  /* Sort by year descending */
+  /* ---- STEP 4: Sort & render ---- */
+
   allPubs.sort((a, b) => {
+
     const y1 = parseInt(getYear(a)) || 0;
     const y2 = parseInt(getYear(b)) || 0;
+
     return y2 - y1;
   });
 
   populateYearFilter();
+
   render();
 }
 
 /* ================================
-   UI FUNCTIONS
+   UI
 ================================ */
+
 function populateYearFilter() {
+
   const years = [...new Set(allPubs.map(w => getYear(w)))]
     .filter(y => y !== "n.d.")
     .sort((a, b) => b - a);
 
-  const select = document.getElementById("yearFilter");
+  const select =
+    document.getElementById("yearFilter");
+
   years.forEach(y => {
+
     const opt = document.createElement("option");
+
     opt.value = y;
     opt.textContent = y;
+
     select.appendChild(opt);
   });
 }
 
 function render() {
-  const container = document.getElementById("pubs");
-  const searchTerm = document.getElementById("search").value.toLowerCase();
-  const yearFilter = document.getElementById("yearFilter").value;
+
+  const container =
+    document.getElementById("pubs");
+
+  const searchTerm =
+    document.getElementById("search")
+      .value.toLowerCase();
+
+  const yearFilter =
+    document.getElementById("yearFilter").value;
 
   container.innerHTML = "";
 
   const filtered = allPubs.filter(w => {
-    const text = formatCitation(w).toLowerCase();
-    const yearMatch = yearFilter === "all" || getYear(w) === yearFilter;
+
+    const text =
+      formatCitation(w).toLowerCase();
+
+    const yearMatch =
+      yearFilter === "all" ||
+      getYear(w) === yearFilter;
+
     return text.includes(searchTerm) && yearMatch;
   });
 
   if (!filtered.length) {
-    container.innerHTML = "<p class='loading'>No matching publications.</p>";
+
+    container.innerHTML =
+      "<p class='loading'>No matching publications.</p>";
+
     return;
   }
 
   const grouped = {};
+
   filtered.forEach(w => {
+
     const y = getYear(w);
+
     if (!grouped[y]) grouped[y] = [];
+
     grouped[y].push(w);
   });
 
   Object.keys(grouped)
     .sort((a, b) => b - a)
     .forEach(y => {
-      const yearDiv = document.createElement("div");
+
+      const yearDiv =
+        document.createElement("div");
+
       yearDiv.className = "year";
       yearDiv.textContent = y;
+
       container.appendChild(yearDiv);
 
       grouped[y].forEach(w => {
-        const div = document.createElement("div");
+
+        const div =
+          document.createElement("div");
+
         div.className = "pub";
+
         div.innerHTML = formatCitation(w);
+
         container.appendChild(div);
       });
     });
@@ -285,13 +396,19 @@ function render() {
 /* ================================
    EVENTS
 ================================ */
-document.getElementById("search").addEventListener("input", render);
-document.getElementById("yearFilter").addEventListener("change", render);
+
+document.getElementById("search")
+  .addEventListener("input", render);
+
+document.getElementById("yearFilter")
+  .addEventListener("change", render);
 
 /* ================================
    INIT
 ================================ */
+
 loadPublications();
+
 </script>
 
 </body>
